@@ -3,12 +3,6 @@
 # ⚡ Atomix
 ### Polyglot High-Concurrency Flash-Sale & Inventory Reservation Engine
 
-[![TypeScript](https://img.shields.io/badge/Edge_Gateway-Node.js_%7C_TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Spring Boot](https://img.shields.io/badge/Core_Ledger-Java_%7C_Spring_Boot-6DB33F?style=for-the-badge&logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
-[![Redis](https://img.shields.io/badge/Atomic_State-Redis_%7C_Lua_%7C_BullMQ-DC382D?style=for-the-badge&logo=redis&logoColor=white)](https://redis.io/)
-[![PostgreSQL](https://img.shields.io/badge/ACID_Storage-PostgreSQL-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
-[![Docker](https://img.shields.io/badge/Orchestration-Docker_Compose_%7C_Nginx-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
-
 *A distributed systems engineering project demonstrating how to survive 10,000+ concurrent requests competing for limited inventory without race conditions, database lock contention, or overselling.*
 
 </div>

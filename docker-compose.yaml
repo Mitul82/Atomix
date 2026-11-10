@@ -42,11 +42,13 @@ services:
     image: rabbitmq:4-management
     container_name: Atomix-rabbitmq
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "5672:5672" # this is for the application connections
+      - "15672:15672" # this is for the web UI dashboard
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+    networks:
+      - atomix-network
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
       - rabbitmq_logs:/var/log/rabbitmq
@@ -66,7 +68,7 @@ services:
     networks:
       - atomix-network
     ports:
-      - "8080:8080"
+      - "8080:80"
     depends_on:
       - postgres
     volumes:
@@ -85,4 +87,5 @@ volumes:
 
 networks:
   atomix-network:
+   name: atomix-network
    driver: bridge
