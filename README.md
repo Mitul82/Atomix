@@ -11,8 +11,6 @@
 
 *A distributed systems engineering project demonstrating how to survive 10,000+ concurrent requests competing for limited inventory without race conditions, database lock contention, or overselling.*
 
-[Architecture](#-system-architecture) • [Core Engineering Highlights](#-core-engineering-highlights) • [Naive vs. Atomic Benchmark](#-the-war-room-naive-vs-atomic-mode) • [Quick Start](#-getting-started) • [API Reference](#-api-endpoints)
-
 </div>
 
 ---
