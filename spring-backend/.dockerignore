@@ -1,0 +1,41 @@
+# * Build output (rebuilt inside the image)
+target/
+build/
+out/
+
+# * Secrets and local config
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+application-local.*
+
+# * Version control and CI
+.git/
+.gitignore
+.gitattributes
+.github/
+
+# * IDE and OS files
+.idea/
+.vscode/
+*.iml
+.settings/
+.classpath
+.project
+.DS_Store
+Thumbs.db
+
+# * Logs and temp files
+*.log
+logs/
+tmp/
+
+# * Docker files themselves (not needed in the context)
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# * Docs
+*.md
