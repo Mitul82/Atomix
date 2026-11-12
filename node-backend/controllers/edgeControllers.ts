@@ -9,6 +9,7 @@ import { reserveRequestSchema, telemetryQuerySchema } from '@/validation/schemaV
 
 import type { Request, Response } from 'express';
 import { IReservationPayload } from '@/types/IReservationPayload.js';
+import { number } from 'zod';
 
 const atomicReserve = async (req: Request, res: Response) => {
     try {
@@ -67,6 +68,8 @@ const atomicReserve = async (req: Request, res: Response) => {
         }
     } catch (err: unknown) {
         console.error('[NODE BACKEND] Error in atomicReserve controller: ', err);
+
+        return res.status(500).json({ success: false, message: 'Internal Server error' });
     }
 }
 
@@ -95,6 +98,8 @@ const seedRedis = async (req: Request, res: Response) => {
        return res.status(200).json({ success: false, message: `Redis state initialized for event ${eventId} with stock = ${initialStock}`, eventId, stock: initialStock });
     } catch (err: unknown) {
         console.error('[NODE BACKEND] Error in seedRedis controller: ', err);
+
+        return res.status(500).json({ success: false, message: 'Internal Server error' });
     }
 }
 
@@ -136,6 +141,8 @@ const getTelemetry = async (req: Request, res: Response) => {
                 res.write(`data: ${JSON.stringify(payload)}\n\n`);
             } catch (err) {
                 console.error('[NODE BACKEND] Error pushing SSE telemetry:', err);
+
+                return res.status(500).json({ success: false, message: 'Internal Server error' });
             }
         };
 
@@ -150,7 +157,55 @@ const getTelemetry = async (req: Request, res: Response) => {
         });
     } catch (err: unknown) {
         console.error('[NODE BACKEND] Error in getTelemetry controller: ', err);
+
+        return res.status(500).json({ success: false, message: 'Internal Server error' });
     }
 }
 
-export { atomicReserve, seedRedis, getTelemetry }
+const simulateSpike = async (req: Request, res: Response) => {
+    try {
+        const mode: 'ATOMIC' | 'NAIVE' = req.body?.mode === 'NAIVE' ? 'NAIVE' : 'ATOMIC';
+        const concurrency = Math.min(Number(req.body?.concurency ?? 500), 2000);
+        const eventId = String(req.body?.eventId ?? '1');
+
+        const edgeUrl = `http://localhost:${process.env.PORT}/api/v1/edge/reserve/atomic`;
+        const ledgerUrl = `${process.env.LEDGER_URL}/api/v1/ledger/reserve/naive`;
+        const targetUrl = mode === 'ATOMIC' ? edgeUrl : ledgerUrl;
+
+        const batchId = crypto.randomUUID().slice(0, 8);
+        const startTime = performance.now();
+
+        const requests = Array.from({ length: concurrency }, (_, i) => {
+            const userId = `sim_user_${batchId}_${i + 1}`;
+            const idempotencyKey = `sim_idem_${batchId}_${i + 1}`;
+    
+            return fetch(targetUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-User-Id': userId,
+                    'X-Idempotency-Key': idempotencyKey
+                },
+                body: JSON.stringify({ eventId })
+            })
+                .then((r) => r.status)
+                .catch(() => 500);
+        });
+    
+        const statuses = await Promise.all(requests);
+        const durationMs = Math.round(performance.now() - startTime);
+    
+        const summary = statuses.reduce<Record<number, number>>((acc, code) => {
+            acc[code] = (acc[code] || 0) + 1;
+            return acc;
+        }, {});
+    
+        return res.status(200).json({ mode, concurrency, durationMs, statusBreakdown: summary });
+    } catch (err: unknown) {
+        console.error('[NODE BACKEND] Error in the simpulateSpike controller: ', err);
+
+        return res.status(500).json({ success: false, message: 'Internal Server error' });
+    }
+}
+
+export { atomicReserve, seedRedis, getTelemetry, simulateSpike }
