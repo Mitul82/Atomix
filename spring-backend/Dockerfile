@@ -4,11 +4,11 @@ WORKDIR /app
 
 COPY pom.xml .
 
-RUN --mount=type=cache, target=/root/.m2 mvn -B dependency:go-offline
+RUN --mount=type=cache,target=/root/.m2 mvn -B dependency:go-offline
 
 COPY src ./src
 
-RUN --mount=type=cache, target=/root/.m2 mvn -B clean package --DskipTests
+RUN --mount=type=cache,target=/root/.m2 mvn -B clean package -DskipTests
 
 FROM eclipse-temurin:25-jre-alpine AS runtime
 
@@ -20,6 +20,6 @@ COPY --from=builder /app/target/*.jar app.jar
 
 USER spring
 
-EXPOSE 3000
+EXPOSE 3001
 
 ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75", "-jar", "app.jar"]
