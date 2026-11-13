@@ -1,14 +1,14 @@
 import crypto from 'node:crypto';
 
-import redisClient from '@/database/connectRedis.js';
+import redisClient from '#/database/connectRedis.js';
 
-import { getChannel } from '@/database/connectRabbitmq.js';
-import { executeAtomicReservation } from '@/utils/redis/luaLoader.js';
-import { exchangeName, routingKey } from '@/queues/reservationQueue.js';
-import { reserveRequestSchema, telemetryQuerySchema } from '@/validation/schemaValidation.js';
+import { getChannel } from '#/database/connectRabbitmq.js';
+import { executeAtomicReservation } from '#/utils/redis/luaLoader.js';
+import { exchangeName, routingKey } from '#/queues/reservationQueue.js';
+import { reserveRequestSchema, telemetryQuerySchema } from '#/validation/schemaValidation.js';
 
 import type { Request, Response } from 'express';
-import { IReservationPayload } from '@/types/IReservationPayload.js';
+import { IReservationPayload } from '#/types/IReservationPayload.js';
 import { number } from 'zod';
 
 const atomicReserve = async (req: Request, res: Response) => {

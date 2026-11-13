@@ -32,6 +32,6 @@
     "typescript": "^7.0.2"
   },
   "imports": {
-    "#/*.js": "./*"
+    "#/*.js": "./dist/*.js"
   }
 }

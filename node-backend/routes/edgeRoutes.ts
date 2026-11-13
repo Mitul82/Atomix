@@ -2,7 +2,7 @@ import express from 'express';
 
 const router = express.Router();
 
-import { getTelemetry, atomicReserve, seedRedis, simulateSpike } from '@/controllers/edgeControllers.js';
+import { getTelemetry, atomicReserve, seedRedis, simulateSpike } from '#/controllers/edgeControllers.js';
 
 router.get('/telemetry/stream', getTelemetry);
 router.post('/reserve/atomic', atomicReserve);

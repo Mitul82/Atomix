@@ -8,14 +8,16 @@ import helmet from 'helmet';
 import { rateLimit } from 'express-rate-limit';
 import { RedisStore } from 'rate-limit-redis';
 
-import { loadLuaScript } from '@/utils/redis/luaLoader.js';
-import connectRabbitmq from '@/database/connectRabbitmq.js';
-import initReservationQueue from '@/queues/reservationQueue.js';
-import redisClient, { connectRedis } from '@/database/connectRedis.js';
+import { loadLuaScript } from '#/utils/redis/luaLoader.js';
+import connectRabbitmq from '#/database/connectRabbitmq.js';
+import initReservationQueue from '#/queues/reservationQueue.js';
+import redisClient, { connectRedis } from '#/database/connectRedis.js';
 
-import edgeRoutes from '@/routes/edgeRoutes.js';
+import edgeRoutes from '#/routes/edgeRoutes.js';
 
 const app = express();
+
+app.set('trust proxy', 1);
 
 app.use(express.json());
 

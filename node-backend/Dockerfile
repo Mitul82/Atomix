@@ -4,7 +4,7 @@ WORKDIR /app
 
 COPY package*.json /
 
-RUN npm ci
+RUN npm ci --legacy-peer-deps
 
 COPY . .
 
@@ -18,7 +18,7 @@ COPY --from=builder /app/package*.json ./
 
 COPY --from=builder /app/dist ./dist
 
-RUN npm ci --omit-dev
+RUN npm ci --omit-dev --legacy-peer-deps
 
 USER node
 
