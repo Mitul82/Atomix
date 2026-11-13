@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "nodemon",
     "start": "node ./dist/app.js",
-    "build": "tsc"
+    "build": "tsc",
+    "postbuild": "node scripts/copy-assets.js"
   },
   "keywords": [],
   "type": "module",
