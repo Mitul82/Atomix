@@ -8,7 +8,7 @@ import helmet from 'helmet';
 import { rateLimit } from 'express-rate-limit';
 import { RedisStore } from 'rate-limit-redis';
 
-import { loadLuaScript } from '#/utils/redis/luaLoader.js';
+import { loadLuaScripts } from '#/utils/redis/luaLoader.js';
 import connectRabbitmq from '#/database/connectRabbitmq.js';
 import initReservationQueue from '#/queues/reservationQueue.js';
 import redisClient, { connectRedis } from '#/database/connectRedis.js';
@@ -77,7 +77,7 @@ const port = process.env.PORT || 3000;
 
 const start = async () => {
     try {
-        await loadLuaScript();
+        await loadLuaScripts();
         const channel = await connectRabbitmq(process.env.RABBITMQ_URL as string);
 
         await initReservationQueue(channel);
