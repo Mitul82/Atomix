@@ -3,8 +3,15 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const source = resolve(projectRoot, 'utils/redis/reserveInventory.lua');
-const destination = resolve(projectRoot, 'dist/utils/redis/reserveInventory.lua');
+const sourceDir = resolve(projectRoot, 'utils/redis');
+const destDir = resolve(projectRoot, 'dist/utils/redis');
 
-await mkdir(dirname(destination), { recursive: true });
-await copyFile(source, destination);
+const luaScripts = ['reserveInventory.lua', 'compensateReservation.lua'];
+
+await mkdir(destDir, { recursive: true });
+
+await Promise.all(
+    luaScripts.map((file) =>
+        copyFile(resolve(sourceDir, file), resolve(destDir, file))
+    )
+);

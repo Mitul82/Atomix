@@ -15,6 +15,10 @@ import com.springbootbackend.springbackend.enums.ReservationStatus;
     indexes = {
         @Index(name = "idx_reservation_status_expires", columnList = "status, expiresAt"),
         @Index(name = "idx_reservation_event_mode", columnList = "eventId, mode")
+    },
+    uniqueConstraints = {
+        @UniqueConstraint(name = "uk_reservations_idempotency_key", columnNames = "idempotency_key"),
+        @UniqueConstraint(name = "uk_reservations_event_user", columnNames = {"event_id", "user_id"})
     }
 )
 @Getter
@@ -26,13 +30,13 @@ public class Reservation {
     @Id
     private UUID id;
 
-    @Column(nullable = false)
+    @Column(nullable = false, name = "event_id")
     private String eventId;
 
-    @Column(nullable = false)
+    @Column(nullable = false, name = "user_id")
     private String userId;
 
-    @Column(nullable = false, unique = true)
+    @Column(nullable = false, unique = true, name = "idempotency_key")
     private String idempotencyKey;
 
     @Enumerated(EnumType.STRING)

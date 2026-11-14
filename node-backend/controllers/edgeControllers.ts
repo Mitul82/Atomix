@@ -3,14 +3,25 @@ import crypto from 'node:crypto';
 import redisClient from '#/database/connectRedis.js';
 
 import { getChannel } from '#/database/connectRabbitmq.js';
-import { executeAtomicReservation } from '#/utils/redis/luaLoader.js';
+import { executeAtomicReservation, executeAtomicCompensation } from '#/utils/redis/luaLoader.js';
 import { exchangeName, routingKey } from '#/queues/reservationQueue.js';
 import { reserveRequestSchema, telemetryQuerySchema } from '#/validation/schemaValidation.js';
 
+import type amqp from 'amqplib';
 import type { Request, Response } from 'express';
+
 import { IReservationPayload } from '#/types/IReservationPayload.js';
 
 const soldOutCache = new Map<string, number>();
+
+const publishWithConfirm = (channel: amqp.ConfirmChannel, exchange: string, key: string, content: Buffer, options: amqp.Options.Publish) => {
+    return new Promise((resolve, reject) => {
+        channel.publish(exchange, key, content, options, (err: unknown) => {
+            if(err) return reject(err);
+            resolve(err);            
+        });
+    });
+}
 
 const atomicReserve = async (req: Request, res: Response) => {
     try {
@@ -51,11 +62,19 @@ const atomicReserve = async (req: Request, res: Response) => {
 
                 const messageBuffer = Buffer.from(JSON.stringify(payload));
 
-                channel.publish(exchangeName, routingKey, messageBuffer, {
-                    persistent: true,
-                    contentType: 'application/json',
-                    timestamp: Date.now()
-                });
+                try {
+                    await publishWithConfirm(channel, exchangeName, routingKey, messageBuffer, {
+                        persistent: true,
+                        contentType: 'application/json',
+                        timestamp: Date.now()
+                    });
+                } catch (err: unknown) {
+                    console.error('[NODE BACKEND] RabbitMQ publish failed: ', err);
+
+                    await executeAtomicCompensation(eventId, userId, idempotencyKey);
+
+                    return res.status(503).json({ success: false, message: 'Order queue temporarily unavailable. Your reservation was safely rolled back—please retry.' });
+                }
 
                 return res.status(202).json({ status: 'QUEUED', message: 'Inventory reserved at edge and queued for ledger persistence.', reservationId, eventId, userId, reservedAt });
             }
@@ -85,6 +104,8 @@ const seedRedis = async (req: Request, res: Response) => {
         const eventId = (req.body?.eventId as string) || '1';
         const initialStock = Number(req.body?.stock ?? 100);
 
+        soldOutCache.delete(eventId);
+
         const stockKey = `atomix:event:${eventId}:stock`;
         const buyersKey = `atomix:event:${eventId}:buyers`;
         const telemetryKey = `atomix:event:${eventId}:telemetry`;
@@ -102,7 +123,7 @@ const seedRedis = async (req: Request, res: Response) => {
             })
         ]);
 
-       return res.status(200).json({ success: false, message: `Redis state initialized for event ${eventId} with stock = ${initialStock}`, eventId, stock: initialStock });
+       return res.status(200).json({ success: true, message: `Redis state initialized for event ${eventId} with stock = ${initialStock}`, eventId, stock: initialStock });
     } catch (err: unknown) {
         console.error('[NODE BACKEND] Error in seedRedis controller: ', err);
 
@@ -121,11 +142,15 @@ const getTelemetry = async (req: Request, res: Response) => {
         res.setHeader('X-Accel-Buffering', 'no');
         res.flushHeaders();
 
+        let isStreamClosed = false;
+
         const stockKey = `atomix:event:${eventId}:stock`;
         const buyersKey = `atomix:event:${eventId}:buyers`;
         const telemetryKey = `atomix:event:${eventId}:telemetry`;
 
         const pushTelemetry = async () => {
+            if (isStreamClosed || res.writableEnded) return;
+            
             try {
                 const [rawStock, uniqueBuyers, telemetryHash] = await Promise.all([
                     redisClient.get(stockKey),
@@ -149,7 +174,9 @@ const getTelemetry = async (req: Request, res: Response) => {
             } catch (err) {
                 console.error('[NODE BACKEND] Error pushing SSE telemetry:', err);
 
-                return res.status(500).json({ success: false, message: 'Internal Server error' });
+                if (!isStreamClosed && !res.writableEnded) {
+                    res.write(`event: error\ndata: ${JSON.stringify({ message: 'Telemetry read error' })}\n\n`);
+                }
             }
         };
 
@@ -172,7 +199,7 @@ const getTelemetry = async (req: Request, res: Response) => {
 const simulateSpike = async (req: Request, res: Response) => {
     try {
         const mode: 'ATOMIC' | 'NAIVE' = req.body?.mode === 'NAIVE' ? 'NAIVE' : 'ATOMIC';
-        const concurrency = Math.min(Number(req.body?.concurency ?? 500), 2000);
+        const concurrency = Math.min(Number(req.body?.concurrency ?? 500), 2000);
         const eventId = String(req.body?.eventId ?? '1');
 
         const edgeUrl = `http://localhost:${process.env.PORT}/api/v1/reserve/atomic`;

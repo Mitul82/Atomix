@@ -39,6 +39,12 @@ spring:
                 concurrency: 4
                 max-concurrency: 8
                 default-requeue-rejected: false
+                retry:
+                    enabled: true
+                    max-retries: 3
+                    initial-interval: 2000ms
+                    multiplier: 2.0
+                    max-interval: 10000ms 
 
 server:
     port: 3001

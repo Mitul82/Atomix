@@ -3,6 +3,7 @@ package com.springbootbackend.springbackend.repositories;
 import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 
 import com.springbootbackend.springbackend.models.Reservation;
 
@@ -21,4 +22,7 @@ public interface ReservationRespository extends JpaRepository<Reservation, UUID>
     long countByEventIdAndStatus(String eventId, ReservationStatus status);
 
     long countByEventIdAndMode(String eventId, ReservationMode mode);
+
+    @Query(value = "SELECT * FROM reservations WHERE status = 'PENDING' AND expires_at < NOW() FOR UPDATE SKIP LOCKED LIMIT 100", nativeQuery = true)
+    List<Reservation> findAndLockExpiredReservations();
 }

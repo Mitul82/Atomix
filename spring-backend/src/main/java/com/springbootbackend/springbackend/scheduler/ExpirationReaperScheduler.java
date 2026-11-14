@@ -1,9 +1,9 @@
 package com.springbootbackend.springbackend.scheduler;
 
-import java.time.Instant;
 import java.util.List;
 
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -24,10 +24,21 @@ public class ExpirationReaperScheduler {
     private final FlashSaleEventRepository eventRepo;
     private final StringRedisTemplate redisTemplate;
 
+    private static final DefaultRedisScript<Long> reaperRestoreScript = new DefaultRedisScript<>(
+            "if redis.call('SISMEMBER', KEYS[2], ARGV[1]) == 1 then " +
+            "  redis.call('INCR', KEYS[1]); " +
+            "  redis.call('SREM', KEYS[2], ARGV[1]); " +
+            "  redis.call('HINCRBY', KEYS[3], 'reaper_restored', 1); " +
+            "  return 1; " +
+            "end; " +
+            "return 0;",
+            Long.class
+    );
+
     @Scheduled(fixedDelay = 10000) // * runs every 10 seconds
     @Transactional
     public void reapExpiredReservation() {
-        List<Reservation> expireList = reservationRepo.findByStatusAndExpiresAtBefore(ReservationStatus.EXPIRED, Instant.now());
+        List<Reservation> expireList = reservationRepo.findAndLockExpiredReservations();
 
         if(expireList.isEmpty()) {
             return;
@@ -35,7 +46,7 @@ public class ExpirationReaperScheduler {
 
         log.info("[SPRING LEDGER] Found {} expired PENDING reservations. Reconcilling state...", expireList.size());
 
-        for(Reservation reservation : expireList) {
+        for (Reservation reservation : expireList) {
             reservation.setStatus(ReservationStatus.EXPIRED);
             reservationRepo.save(reservation);
 
@@ -44,15 +55,14 @@ public class ExpirationReaperScheduler {
                 eventRepo.save(event);
             });
 
-            // ! remove the user from the buyers set in redis so they can try again and also reset the stock count in redis to +1
             String eventId = reservation.getEventId();
-            String stockKey = "atomix:event:" + eventId + ":stock";
-            String buyersKey = "atomix:event:" + eventId + ":buyers";
-            String telemetryKey = "atomix:event:" + eventId + ":telemetry";
+            List<String> keys = List.of(
+                    "atomix:event:" + eventId + ":stock",
+                    "atomix:event:" + eventId + ":buyers",
+                    "atomix:event:" + eventId + ":telemetry"
+            );
 
-            redisTemplate.opsForValue().increment(stockKey, 1);
-            redisTemplate.opsForSet().remove(buyersKey, reservation.getUserId());
-            redisTemplate.opsForHash().increment(telemetryKey, "reaper_restored", 1);
+            redisTemplate.execute(reaperRestoreScript, keys, reservation.getUserId());
         }
     }
 }

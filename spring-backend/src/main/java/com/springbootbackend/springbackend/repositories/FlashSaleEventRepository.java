@@ -15,4 +15,12 @@ public interface FlashSaleEventRepository extends JpaRepository<FlashSaleEvent, 
    @Modifying
    @Query("UPDATE FlashSaleEvent e SET e.availableInventory = e.availableInventory - 1 WHERE e.id = :id")
    void decrementInventoryNaive(@Param("id") String id);
+
+    @Modifying
+    @Query("UPDATE FlashSaleEvent e SET e.availableInventory = e.availableInventory - 1 WHERE e.id = :eventId AND e.availableInventory > 0")
+    int decrementInventoryAtomically(@Param("eventId") String eventId);
+
+    @Modifying
+    @Query("UPDATE FlashSaleEvent e SET e.availableInventory = e.availableInventory + 1 WHERE e.id = :eventId")
+    int incrementAvailableInventory(@Param("eventId") String eventId);
 }

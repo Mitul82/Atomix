@@ -1,28 +1,26 @@
-import fs from 'fs';
-import path from 'node:path';
-
+import { readFile } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import redisClient from '#/database/connectRedis.js';
 
 import type { ReservationResult } from '#/types/index.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const currentDir = dirname(fileURLToPath(import.meta.url));
 
-let reserveScriptSha: string | null = null;
-let rawLuaScript: string = '';
+let reserveSha: string | null = null;
+let compensateSha: string | null = null;
 
-export const loadLuaScript = async (): Promise<void> => {
-    const scriptPath = path.join(__dirname, 'reserveInventory.lua');
-    rawLuaScript = fs.readFileSync(scriptPath, 'utf8');
+export const loadLuaScripts = async (): Promise<void> => {
+    const reserveScript = await readFile(resolve(currentDir, 'reserveInventory.lua'), 'utf-8');
+    const compensateScript = await readFile(resolve(currentDir, 'compensateReservation.lua'), 'utf-8');
 
-    reserveScriptSha = await redisClient.scriptLoad(rawLuaScript);
-    console.log(`[NODE BACKEND] Loaded reserveInventory.lua into Redis (SHA: ${reserveScriptSha})`);
+    reserveSha = await redisClient.scriptLoad(reserveScript);
+    compensateSha = await redisClient.scriptLoad(compensateScript);
 }
 
 export const executeAtomicReservation = async (eventId: string, userId: string, idempotencyKey: string, ttlSeconds: number = 300): Promise<ReservationResult> => {
-    if (!reserveScriptSha) {
+    if (!reserveSha) {
         throw new Error('Lua script has not been loaded into Redis yet.');
     }
 
@@ -41,20 +39,13 @@ export const executeAtomicReservation = async (eventId: string, userId: string, 
     let resultCode: number;
 
     try {
-        resultCode = (await redisClient.evalSha(reserveScriptSha, {
+        resultCode = (await redisClient.evalSha(reserveSha, {
             keys,
             arguments: args
         })) as number;
-    } catch (err: any) {
-        if (err?.message?.includes('NOSCRIPT')) {
-            reserveScriptSha = await redisClient.scriptLoad(rawLuaScript);
-            resultCode = (await redisClient.evalSha(reserveScriptSha, {
-                keys,
-                arguments: args
-            })) as number;
-        } else {
-            throw err;
-        }
+    } catch (err: unknown) {
+        console.error('[NODE BACKEND] Error in executing the lua script: ', err);
+        throw err;
     }
 
     switch (resultCode) {
@@ -70,3 +61,19 @@ export const executeAtomicReservation = async (eventId: string, userId: string, 
             throw new Error(`Unexpected Lua return code: ${resultCode}`);
     }
 }
+
+export const executeAtomicCompensation = async (eventId: string, userId: string, idempotencyKey: string): Promise<void> => {
+    if (!compensateSha) {
+        await loadLuaScripts();
+    }
+
+    await redisClient.evalSha(compensateSha!, {
+        keys: [
+            `atomix:event:${eventId}:stock`,
+            `atomix:event:${eventId}:buyers`,
+            `atomix:idemp:${idempotencyKey}`,
+            `atomix:event:${eventId}:telemetry`,
+        ],
+        arguments: [userId],
+    });
+};

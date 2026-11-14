@@ -9,18 +9,18 @@
     * If a consumer crashes before acking, RabbitMQ redelivers the message.
 */
 
-import amqp, { type ChannelModel, type Channel } from 'amqplib';
+import amqp, { type ChannelModel, type ConfirmChannel } from 'amqplib';
 
 let connection: ChannelModel | null = null;
-let channel: Channel | null = null;
+let channel: ConfirmChannel | null = null;
 
-const connectRabbitMQ = async (url: string): Promise<Channel> => {
+const connectRabbitMQ = async (url: string): Promise<ConfirmChannel> => {
     if(channel) {
         return channel;
     }
 
     connection = await amqp.connect(url);
-    channel = await connection.createChannel();
+    channel = await connection.createConfirmChannel();
 
     connection.on('error', (err: unknown) => {
         console.error('[NODE BACKEND] Error in rabbitmq connection: ', err);
@@ -37,7 +37,7 @@ const connectRabbitMQ = async (url: string): Promise<Channel> => {
     return channel;
 }
 
-export const getChannel = (): Channel => {
+export const getChannel = (): ConfirmChannel => {
     if(!channel) {
         throw Error('[NODE BACKEND] Rabbitmq channel not initialized');
     }

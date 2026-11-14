@@ -37,11 +37,10 @@ public class LedgerService {
             return;
         }
 
-        FlashSaleEvent event = eventRepo.findById(payload.eventId()).orElseThrow(() -> new IllegalStateException("[SPRING LEDGER] Event not found: " + payload.eventId()));
-
-        event.setAvailableInventory(event.getAvailableInventory() - 1);
-
-        eventRepo.save(event);
+        int updatedRows = eventRepo.decrementInventoryAtomically(payload.eventId());
+        if(updatedRows == 0) {
+            throw new IllegalStateException("[SPRING LEDGER] Event not found or database inventory exhausted for event: " + payload.eventId());
+        }
 
         Instant now = Instant.now();
         
@@ -108,6 +107,10 @@ public class LedgerService {
     @Transactional
     public Reservation confirmPayment(UUID reservationId) {
         Reservation reservation = reservationRepo.findById(reservationId).orElseThrow(() -> new IllegalArgumentException("[SPRING LEDGER] Reservation not found: " + reservationId));
+
+        if(reservation.getStatus() == ReservationStatus.CONFIRMED) {
+            return reservation;
+        }
 
         if(reservation.getStatus() == ReservationStatus.EXPIRED) {
             throw new IllegalStateException("[SPRING LEDGER] Cannot pay for an expired reservation");
