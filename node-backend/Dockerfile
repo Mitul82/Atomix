@@ -2,7 +2,7 @@ FROM node:24.14.1-alpine AS builder
 
 WORKDIR /app
 
-COPY package*.json /
+COPY package*.json ./
 
 RUN npm ci --legacy-peer-deps
 
@@ -14,14 +14,16 @@ FROM node:24.14.1-alpine AS runner
 
 WORKDIR /app
 
-COPY --from=builder /app/package*.json ./
+COPY --chown=node:node --from=builder /app/package*.json ./
 
-COPY --from=builder /app/dist ./dist
+COPY --chown=node:node --from=builder /app/dist ./dist
 
-RUN npm ci --omit-dev --legacy-peer-deps
+RUN npm ci --omit-dev --legacy-peer-deps && npm install pm2 -g
+
+RUN npm cache clean --force
 
 USER node
 
 EXPOSE 3000
 
-CMD ["node", "dist/app.js"]
+CMD ["pm2-runtime", "dist/app.js", "-i", "max", "--node-args", "--max-old-space-size=1024"]

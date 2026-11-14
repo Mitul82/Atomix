@@ -65,7 +65,10 @@ app.use(rateLimit({
         return `user:${userId}`;
     },
     message: 'Too many requests from this IP/USER, please try again after some time',
-    validate: false
+    validate: false,
+    skip: (req: express.Request) => 
+        // * skipping rate limit fro telemetry because that id for monitoring only and atomic reserve because the lua script loaded into redis already acts as a rate limit
+        req.path.includes('/telemetry/stream') || req.path.includes('/reserve/atomic')
 }));
 
 app.use('/api/v1', edgeRoutes);

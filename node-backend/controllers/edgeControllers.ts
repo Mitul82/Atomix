@@ -9,7 +9,8 @@ import { reserveRequestSchema, telemetryQuerySchema } from '#/validation/schemaV
 
 import type { Request, Response } from 'express';
 import { IReservationPayload } from '#/types/IReservationPayload.js';
-import { number } from 'zod';
+
+const soldOutCache = new Map<string, number>();
 
 const atomicReserve = async (req: Request, res: Response) => {
     try {
@@ -27,6 +28,11 @@ const atomicReserve = async (req: Request, res: Response) => {
         const userId = parsed.data.headers['x-user-id'];
         const idempotencyKey = parsed.data.headers['x-idempotency-key'];
         const { eventId } = parsed.data.body;
+
+        const cacheUntil = soldOutCache.get(eventId);
+        if(cacheUntil && Date.now() < cacheUntil) {
+            return res.status(409).json({ success: false, message: 'Flash sale inventory is completely exhausted.' });
+        }
 
         const luaResult = await executeAtomicReservation(eventId, userId, idempotencyKey, 300);
         
@@ -55,6 +61,7 @@ const atomicReserve = async (req: Request, res: Response) => {
             }
             
             case 'SOLD_OUT': {
+                soldOutCache.set(eventId, Date.now() + 250);
                 return res.status(409).json({ success: false, message: 'Flash sale inventory is completely exhausted.' });
             }
 
@@ -168,7 +175,7 @@ const simulateSpike = async (req: Request, res: Response) => {
         const concurrency = Math.min(Number(req.body?.concurency ?? 500), 2000);
         const eventId = String(req.body?.eventId ?? '1');
 
-        const edgeUrl = `http://localhost:${process.env.PORT}/api/v1/edge/reserve/atomic`;
+        const edgeUrl = `http://localhost:${process.env.PORT}/api/v1/reserve/atomic`;
         const ledgerUrl = `${process.env.LEDGER_URL}/api/v1/ledger/reserve/naive`;
         const targetUrl = mode === 'ATOMIC' ? edgeUrl : ledgerUrl;
 

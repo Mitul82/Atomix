@@ -10,17 +10,17 @@ if redis.call('EXISTS', KEYS[3]) == 1 then
     return -3 -- Code -3: Idempotent duplicate retry
 end
 
--- 2. Check Duplicate Buyer: Did this user already reserve this flash-sale item?
-if redis.call('SISMEMBER', KEYS[2], ARGV[1]) == 1 then
-    redis.call('HINCRBY', KEYS[4], 'rejected_duplicate', 1)
-    return -2 -- Code -2: User already bought 1 item
-end
-
--- 3. Check Stock Availability
+-- 2. Check Stock Availability
 local currentStock = tonumber(redis.call('GET', KEYS[1]) or "0")
 if currentStock <= 0 then
     redis.call('HINCRBY', KEYS[4], 'rejected_sold_out', 1)
     return -1 -- Code -1: Sold Out!
+end
+
+-- 3. Check Duplicate Buyer: Did this user already reserve this flash-sale item?
+if redis.call('SISMEMBER', KEYS[2], ARGV[1]) == 1 then
+    redis.call('HINCRBY', KEYS[4], 'rejected_duplicate', 1)
+    return -2 -- Code -2: User already bought 1 item
 end
 
 -- 4. All checks passed! Atomically reserve the item:

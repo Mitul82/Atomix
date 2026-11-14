@@ -1,0 +1,12 @@
+{
+  "name": "atomix-monorepo",
+  "private": true,
+  "scripts": {
+    "dev-up": "docker-compose -f docker-compose.dev.yaml --env-file ./.env.dev up --build -d",
+    "dev-down": "docker-compose -f docker-compose.dev.yaml down",
+    "dev-logs": "docker-compose -f docker-compose.dev.yaml logs -f",
+    "prod-up": "docker-compose -f docker-compose.prod.yaml --env-file ./.env.prod up --build -d",
+    "prod-down": "docker-compose -f docker-compose.prod.yaml down",
+    "prod-logs": "docker-compose -f docker-compose.prod.yaml logs -f"
+  }
+}

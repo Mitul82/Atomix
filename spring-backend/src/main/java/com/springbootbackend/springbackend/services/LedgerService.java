@@ -70,7 +70,7 @@ public class LedgerService {
         if(event.getAvailableInventory() <= 0) {
             String telemetryKey = "atomix:event:" + eventId + ":telemetry";
             redisTemplate.opsForHash().increment(telemetryKey, "rejected_sold_out", 1);
-            throw new IllegalStateException("[SPRING LEDGER] SOLD_OUT");
+            throw new IllegalStateException("SOLD_OUT");
         }
 
         // * simulate 15ms network/validation delay
