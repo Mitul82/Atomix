@@ -8,9 +8,9 @@ import helmet from 'helmet';
 import { rateLimit } from 'express-rate-limit';
 import { RedisStore } from 'rate-limit-redis';
 
+import { startOutbox, stopOutbox } from '#/utils/rabbit/outbox.js';
 import { loadLuaScripts } from '#/utils/redis/luaLoader.js';
-import connectRabbitmq from '#/database/connectRabbitmq.js';
-import initReservationQueue from '#/queues/reservationQueue.js';
+import connectRabbitmq, { closeRabbitMQ } from '#/database/connectRabbitmq.js';
 import redisClient, { connectRedis } from '#/database/connectRedis.js';
 
 import edgeRoutes from '#/routes/edgeRoutes.js';
@@ -78,23 +78,29 @@ const port = process.env.PORT || 3000;
 const start = async () => {
     try {
         await loadLuaScripts();
-        const channel = await connectRabbitmq(process.env.RABBITMQ_URL as string);
+        await connectRabbitmq(process.env.RABBITMQ_URL as string);
 
-        await initReservationQueue(channel);
+        const instance = process.env.NODE_APP_INSTANCE;
+        if (instance === undefined || instance === '0') {
+            await startOutbox();
+        }
 
-        app.listen(port, () => {
-            console.log(`[NODE BACKEND] Server is running on port ${port}...`)
+        app.listen(port, () =>{
+            console.log(`[NODE BACKEND] Server is running on port ${port}...`);
         });
 
         const shutDown = async () => {
             try {
+                stopOutbox();
+
+                await closeRabbitMQ();
+
                 await redisClient.quit();
-                await channel.close();
 
                 console.log('[NODE BACKEND] Connections closed successfully');
 
                 process.exit(0);
-            } catch (err:  unknown) {
+            } catch (err: unknown) {
                 console.error('[NODE BACKEND] Error in application shutdown: ', err);
 
                 process.exit(1);

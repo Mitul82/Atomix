@@ -2,95 +2,68 @@ import crypto from 'node:crypto';
 
 import redisClient from '#/database/connectRedis.js';
 
-import { getChannel } from '#/database/connectRabbitmq.js';
-import { executeAtomicReservation, executeAtomicCompensation } from '#/utils/redis/luaLoader.js';
-import { exchangeName, routingKey } from '#/queues/reservationQueue.js';
-import { reserveRequestSchema, telemetryQuerySchema } from '#/validation/schemaValidation.js';
+import publishReservation from '#/utils/rabbit/publish.js';
+import { outboxKey } from '#/utils/rabbit/outbox.js';
+import { executeAtomicReservation, executeAtomicCompensation, idempotencyKeyFor } from '#/utils/redis/luaLoader.js';
+import { reserveRequestSchema, reservationStatusSchema, telemetryQuerySchema } from '#/validation/schemaValidation.js';
 
-import type amqp from 'amqplib';
 import type { Request, Response } from 'express';
 
 import { IReservationPayload } from '#/types/IReservationPayload.js';
 
 const soldOutCache = new Map<string, number>();
 
-const publishWithConfirm = (channel: amqp.ConfirmChannel, exchange: string, key: string, content: Buffer, options: amqp.Options.Publish) => {
-    return new Promise((resolve, reject) => {
-        channel.publish(exchange, key, content, options, (err: unknown) => {
-            if(err) return reject(err);
-            resolve(err);            
-        });
-    });
-}
-
 const atomicReserve = async (req: Request, res: Response) => {
     try {
-        const channel = getChannel();
+        const parsed = reserveRequestSchema.safeParse({ headers: req.headers, body: req.body ?? {} });
 
-        const parsed = reserveRequestSchema.safeParse({
-            headers: req.headers,
-            body: req.body ?? {}
-        });
-
-        if(!parsed.success) {
-            return res.status(400).json({ success: false, message: parsed.error.flatten() });
-        }
+        if (!parsed.success) return res.status(400).json({ success: false, message: parsed.error.flatten() });
 
         const userId = parsed.data.headers['x-user-id'];
         const idempotencyKey = parsed.data.headers['x-idempotency-key'];
         const { eventId } = parsed.data.body;
 
         const cacheUntil = soldOutCache.get(eventId);
-        if(cacheUntil && Date.now() < cacheUntil) {
-            return res.status(409).json({ success: false, message: 'Flash sale inventory is completely exhausted.' });
+
+        if (cacheUntil && Date.now() < cacheUntil) {
+            return res.status(409).json({ success: false, code: 'SOLD_OUT', message: 'Sold out. If you already reserved, check GET /api/v1/reserve/status.' });
         }
 
-        const luaResult = await executeAtomicReservation(eventId, userId, idempotencyKey, 300);
-        
-        switch(luaResult) {
-            case 'RESERVED':{
-                const reservationId = crypto.randomUUID();
-                const reservedAt = new Date().toISOString();
+        const reservationId = crypto.randomUUID();
+        const result = await executeAtomicReservation(eventId, userId, idempotencyKey, reservationId, 300);
 
+        switch (result.status) {
+            case 'RESERVED': {
                 const payload: IReservationPayload = {
-                    eventId,
-                    idempotencyKey,
-                    reservationId,
-                    reservedAt,
-                    userId
+                    eventId, idempotencyKey, reservationId, userId, reservedAt: new Date().toISOString()
                 }
 
-                const messageBuffer = Buffer.from(JSON.stringify(payload));
+                const outcome = await publishReservation(reservationId, Buffer.from(JSON.stringify(payload)));
 
-                try {
-                    await publishWithConfirm(channel, exchangeName, routingKey, messageBuffer, {
-                        persistent: true,
-                        contentType: 'application/json',
-                        timestamp: Date.now()
-                    });
-                } catch (err: unknown) {
-                    console.error('[NODE BACKEND] RabbitMQ publish failed: ', err);
+                if (outcome === 'REJECTED') {
+                    try { 
+                        await executeAtomicCompensation(eventId, userId, idempotencyKey, reservationId); 
+                    } catch (e: unknown) { 
+                        console.error('[CRITICAL] compensation failed', { eventId, userId, reservationId }, e);
+                    }
 
-                    await executeAtomicCompensation(eventId, userId, idempotencyKey);
-
-                    return res.status(503).json({ success: false, message: 'Order queue temporarily unavailable. Your reservation was safely rolled back—please retry.' });
+                    return res.status(503).set('Retry-After', '1').json({ success: false, message: 'Order queue unavailable. Please retry.' });
                 }
 
-                return res.status(202).json({ status: 'QUEUED', message: 'Inventory reserved at edge and queued for ledger persistence.', reservationId, eventId, userId, reservedAt });
+                if (outcome === 'UNKNOWN') {
+                    await redisClient.rPush(outboxKey, JSON.stringify(payload));
+                }
+
+                return res.status(202).json({ status: 'QUEUED', message: 'Inventory reserved at edge and queued for ledger persistence.', reservationId, eventId, userId, reservedAt: payload.reservedAt });
             }
-            
-            case 'SOLD_OUT': {
+            case 'IDEMPOTENT_RETRY':
+                return res.status(202).json({ status: 'QUEUED', replay: true, reservationId: result.reservationId, eventId, userId });
+            case 'SOLD_OUT':
                 soldOutCache.set(eventId, Date.now() + 250);
-                return res.status(409).json({ success: false, message: 'Flash sale inventory is completely exhausted.' });
-            }
 
-            case 'ALREADY_PURCHASED': {
-                return res.status(409).json({ success: false, message: 'Limit 1 item per user for this flash sale event.' });
-            }
-
-            case 'IDEMPOTENT_RETRY': {
-                return res.status(200).json({ success: false, message: 'Request with this X-Idempotency-Key was already processed.' });
-            }
+                return res.status(409).json({ success: false, code: 'SOLD_OUT', message: 'Flash sale inventory is completely exhausted.' });
+            case 'ALREADY_PURCHASED':
+                return res.status(409).json({ success: false, code: 'LIMIT_PER_USER', message: 'Limit 1 item per user for this flash sale event.' });
         }
     } catch (err: unknown) {
         console.error('[NODE BACKEND] Error in atomicReserve controller: ', err);
@@ -106,24 +79,17 @@ const seedRedis = async (req: Request, res: Response) => {
 
         soldOutCache.delete(eventId);
 
-        const stockKey = `atomix:event:${eventId}:stock`;
-        const buyersKey = `atomix:event:${eventId}:buyers`;
-        const telemetryKey = `atomix:event:${eventId}:telemetry`;
+        const response = await fetch(`${process.env.LEDGER_URL}/api/v1/ledger/events/reset`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ eventId, stock: initialStock })
+        });
 
-        await Promise.all([
-            redisClient.set(stockKey, initialStock.toString()),
-            redisClient.del(buyersKey),
-            redisClient.del(telemetryKey),
-            redisClient.hSet(telemetryKey, {
-                accepted_at_edge: '0',
-                rejected_sold_out: '0',
-                rejected_duplicate: '0',
-                postgres_persisted: '0',
-                reaper_restored: '0'
-            })
-        ]);
+        if (!response.ok) {
+            return res.status(502).json({ success: false, message: `Ledger reset failed (${response.status})` });
+        }
 
-       return res.status(200).json({ success: true, message: `Redis state initialized for event ${eventId} with stock = ${initialStock}`, eventId, stock: initialStock });
+        return res.status(200).json({ success: true, message: `Event ${eventId} reset to stock = ${initialStock}`, eventId, stock: initialStock });
     } catch (err: unknown) {
         console.error('[NODE BACKEND] Error in seedRedis controller: ', err);
 
@@ -186,6 +152,7 @@ const getTelemetry = async (req: Request, res: Response) => {
 
         // * Clean up timer when browser closes the SSE tab
         req.on('close', () => {
+            isStreamClosed = true;
             clearInterval(intervalId);
             res.end();
         });
@@ -242,4 +209,20 @@ const simulateSpike = async (req: Request, res: Response) => {
     }
 }
 
-export { atomicReserve, seedRedis, getTelemetry, simulateSpike }
+const reservationStatus = async (req: Request, res: Response) => {
+    try {
+        const parsed = reservationStatusSchema.safeParse({ headers: req.headers, query: req.query });
+
+        if (!parsed.success) return res.status(400).json({ success: false, message: parsed.error.flatten() });
+
+        const reservationId = await redisClient.get(idempotencyKeyFor(parsed.data.query.eventId, parsed.data.headers['x-user-id'], parsed.data.headers['x-idempotency-key']));
+
+        return reservationId ? res.status(200).json({ reserved: true, reservationId }) : res.status(404).json({ reserved: false });
+    } catch (err: unknown) {
+        console.error('[NODE BACKEND] Error in reservationStatus controller: ', err);
+
+        return res.status(500).json({ success: false, message: 'Internal Server error' });
+    }
+};
+
+export { atomicReserve, seedRedis, getTelemetry, simulateSpike, reservationStatus }

@@ -1,13 +1,16 @@
 import { z } from 'zod';
 
+const safeId = z.string().trim().regex(/^[A-Za-z0-9_-]{1,64}$/, 'must be 1-64 chars: letters, digits, _ or -');
+const reserveHeaders = z.object({ 'x-user-id': safeId, 'x-idempotency-key': safeId });
+
 export const reserveRequestSchema = z.object({
-    headers: z.object({
-        'x-user-id': z.string().trim().min(1, 'X-User-Id header is required'),
-        'x-idempotency-key': z.string().trim().min(1, 'X-Idempotency-Key header is required')
-    }),
-    body: z.object({
-        eventId: z.string().trim().min(1, 'eventId is required').default('1')
-    })
+    headers: reserveHeaders,
+    body: z.object({ eventId: safeId.default('1') })
+});
+
+export const reservationStatusSchema = z.object({
+    headers: reserveHeaders,
+    query: z.object({ eventId: safeId.default('1') })
 });
 
 export const telemetryQuerySchema = z.object({

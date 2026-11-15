@@ -36,7 +36,7 @@ public class Reservation {
     @Column(nullable = false, name = "user_id")
     private String userId;
 
-    @Column(nullable = false, unique = true, name = "idempotency_key")
+    @Column(nullable = false, name = "idempotency_key")
     private String idempotencyKey;
 
     @Enumerated(EnumType.STRING)

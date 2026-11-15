@@ -23,10 +23,8 @@ export const routingKey = 'reservation.created';
 
 const initReservationQueue = async (channel: Channel): Promise<void> => {
     await channel.assertExchange(exchangeName, 'direct', { durable: true });
-
-    await channel.assertQueue(queueName, { durable: true });
-
-    await channel.bindQueue(queueName, exchangeName, routingKey);
+    
+    console.log('[NODE BACKEND] Exchange asserted');
 
     console.log('[NODE BACKEND] Reservation queue created');
 }

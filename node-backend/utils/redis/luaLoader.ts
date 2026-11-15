@@ -4,76 +4,68 @@ import { fileURLToPath } from 'node:url';
 
 import redisClient from '#/database/connectRedis.js';
 
-import type { ReservationResult } from '#/types/index.js';
+import type { ReservationResult } from '#/types/ReservationResult.js';
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 
-let reserveSha: string | null = null;
-let compensateSha: string | null = null;
+type ScriptName = 'reserve' | 'compensate';
+
+const scriptFiles: Record<ScriptName, string> = {
+    reserve: 'reserveInventory.lua',
+    compensate: 'compensateReservation.lua'
+}
+
+const scriptShas: Record<ScriptName, string | null> = { reserve: null, compensate: null };
 
 export const loadLuaScripts = async (): Promise<void> => {
-    const reserveScript = await readFile(resolve(currentDir, 'reserveInventory.lua'), 'utf-8');
-    const compensateScript = await readFile(resolve(currentDir, 'compensateReservation.lua'), 'utf-8');
+    for (const name of Object.keys(scriptFiles) as ScriptName[]) {
+        const source = await readFile(resolve(currentDir, scriptFiles[name]), 'utf-8');
 
-    reserveSha = await redisClient.scriptLoad(reserveScript);
-    compensateSha = await redisClient.scriptLoad(compensateScript);
+        scriptShas[name] = await redisClient.scriptLoad(source);    
+    }
 }
 
-export const executeAtomicReservation = async (eventId: string, userId: string, idempotencyKey: string, ttlSeconds: number = 300): Promise<ReservationResult> => {
-    if (!reserveSha) {
-        throw new Error('Lua script has not been loaded into Redis yet.');
-    }
-
-    const keys = [
-        `atomix:event:${eventId}:stock`,      // * KEYS[1]
-        `atomix:event:${eventId}:buyers`,     // * KEYS[2]
-        `atomix:idemp:${idempotencyKey}`,     // * KEYS[3]
-        `atomix:event:${eventId}:telemetry`   // * KEYS[4]
-    ];
-
-    const args = [
-        userId,                               // ? ARGV[1]
-        ttlSeconds.toString()                 // ? ARGV[2]
-    ];
-
-    let resultCode: number;
-
+const runScript = async (name: ScriptName, keys: string[], args: string[]):Promise<unknown> => {
     try {
-        resultCode = (await redisClient.evalSha(reserveSha, {
-            keys,
-            arguments: args
-        })) as number;
-    } catch (err: unknown) {
-        console.error('[NODE BACKEND] Error in executing the lua script: ', err);
-        throw err;
-    }
+        if (!scriptShas[name]) {
+            await loadLuaScripts();
 
-    switch (resultCode) {
-        case 1:
-            return 'RESERVED';
-        case -1:
-            return 'SOLD_OUT';
-        case -2:
-            return 'ALREADY_PURCHASED';
-        case -3:
-            return 'IDEMPOTENT_RETRY';
-        default:
-            throw new Error(`Unexpected Lua return code: ${resultCode}`);
+            return await redisClient.evalSha(scriptShas[name]!, { keys, arguments: args });
+        }
+    } catch (err: unknown) {
+        if (!(err instanceof Error) || !err.message.includes('NOSCRIPT')) {
+            throw err;
+        }
+
+        await loadLuaScripts();
+
+        return redisClient.evalSha(scriptShas[name]!, { keys, arguments: args });
     }
 }
 
-export const executeAtomicCompensation = async (eventId: string, userId: string, idempotencyKey: string): Promise<void> => {
-    if (!compensateSha) {
-        await loadLuaScripts();
-    }
+export const idempotencyKeyFor = (eventId: string, userId: string, key: string): string => (
+    `atomix:idemp:${eventId}:${userId}:${key}`
+);
 
-    await redisClient.evalSha(compensateSha!, {
-        keys: [
-            `atomix:event:${eventId}:stock`,
-            `atomix:event:${eventId}:buyers`,
-            `atomix:idemp:${idempotencyKey}`,
-            `atomix:event:${eventId}:telemetry`,
-        ],
-        arguments: [userId],
-    });
-};
+const keysFor = (eventId: string, userId: string, key: string): string[] => [
+    `atomix:event:${eventId}:stock`,
+    `atomix:event:${eventId}:buyers`,
+    idempotencyKeyFor(eventId, userId, key),
+    `atomix:event:${eventId}:telemetry`
+]
+
+export const executeAtomicReservation = async (eventId: string, userId: string, idempotencyKey: string, reservationId: string, ttlSeconds: number = 300): Promise<ReservationResult> => {
+    const reply = (await runScript('reserve', keysFor(eventId, userId, idempotencyKey), [userId, ttlSeconds.toString(), reservationId])) as [number, string?]
+
+    switch (reply[0]) {
+        case 1:  return { status: 'RESERVED', reservationId };
+        case -1: return { status: 'SOLD_OUT' };
+        case -2: return { status: 'ALREADY_PURCHASED' };
+        case -3: return { status: 'IDEMPOTENT_RETRY', reservationId: reply[1]! };
+        default: throw new Error(`Unexpected Lua reply: ${JSON.stringify(reply)}`);
+    }
+}
+
+export const executeAtomicCompensation = async (eventId: string, userId: string, idempotencyKey: string, reservationId: string): Promise<boolean> => (
+    await runScript('compensate', keysFor(eventId, userId, idempotencyKey), [userId, reservationId])
+) === 1;
