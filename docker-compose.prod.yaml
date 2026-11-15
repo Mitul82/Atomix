@@ -24,6 +24,8 @@ services:
     container_name: Atomix-redis
     networks:
       - atomix-network
+    volumes:
+      - redis_data:/data
     deploy:
       resources:
         limits:
@@ -172,6 +174,7 @@ volumes:
   rabbitmq_data:
   rabbitmq_logs:
   pgadmin_data:
+  redis_data:
 
 networks:
   atomix-network:

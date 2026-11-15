@@ -17,8 +17,7 @@ import com.springbootbackend.springbackend.enums.ReservationStatus;
         @Index(name = "idx_reservation_event_mode", columnList = "eventId, mode")
     },
     uniqueConstraints = {
-        @UniqueConstraint(name = "uk_reservations_idempotency_key", columnNames = "idempotency_key"),
-        @UniqueConstraint(name = "uk_reservations_event_user", columnNames = {"event_id", "user_id"})
+        @UniqueConstraint(name = "uk_reservations_idempotency_key", columnNames = "idempotency_key")
     }
 )
 @Getter

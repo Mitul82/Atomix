@@ -137,7 +137,7 @@ export default function () {
         reservedSuccessCounter.add(1);
     } else if (res.status === 409) {
         const body = res.json();
-        if (body && body.status === 'ALREADY_PURCHASED') {
+        if (body && body.code === 'LIMIT_PER_USER') {
             duplicateRejectedCounter.add(1);
         } else {
             soldOutRejectedCounter.add(1);
@@ -159,7 +159,23 @@ export default function () {
     * Queries Spring Boot Ground-Truth Telemetry to verify if overselling occurred.
 */
 export function teardown() {
-    sleep(2);
+    let data = null, last = -1, stable = 0, waited = 0;
+
+    for (; waited < 60 && stable < 3; waited++) {
+        sleep(1);
+
+        const r = http.get(`${BASE_URL}/api/v1/ledger/telemetry?eventId=${EVENT_ID}`);
+
+        if (r.status !== 200) continue;
+
+        data = r.json();
+
+        stable = data.totalActiveOrders === last ? stable + 1 : 0;
+        
+        last = data.totalActiveOrders;
+    }
+
+    console.log(`Queue drained after ~${waited}s`);
 
     const telemetryRes = http.get(`${BASE_URL}/api/v1/ledger/telemetry?eventId=${EVENT_ID}`);
 

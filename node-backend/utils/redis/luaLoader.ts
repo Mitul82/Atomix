@@ -29,9 +29,9 @@ const runScript = async (name: ScriptName, keys: string[], args: string[]):Promi
     try {
         if (!scriptShas[name]) {
             await loadLuaScripts();
-
-            return await redisClient.evalSha(scriptShas[name]!, { keys, arguments: args });
         }
+        
+        return await redisClient.evalSha(scriptShas[name]!, { keys, arguments: args });
     } catch (err: unknown) {
         if (!(err instanceof Error) || !err.message.includes('NOSCRIPT')) {
             throw err;
